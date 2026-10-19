@@ -78,7 +78,151 @@ const formatter = new Intl.ListFormat()
 
 const app = new Hono()
 
-app.get('/', c => c.redirect('https://hvurs.cc'))
+type Param = [name: string, description: string, def: string]
+
+const labelP = (def: string): Param => ['label', 'the text on the left side', def]
+const labelColorP: Param = ['labelColor', 'the color of the left side', 'gray']
+const colorP = (def: string): Param => ['color', 'the color of the right side', def]
+const styleP: Param = ['style', 'flat, flat-square, plastic, for-the-badge, or social', 'flat']
+const fallbackP = (desc: string): Param => ['fallback', desc, 'nothing rn']
+const hideLogoP = (name: string): Param => ['hideLogo', `whether to disable the ${name} logo`, 'false']
+
+const docSections: { title: string, path: string, params: Param[] }[] = [
+	{
+		title: 'Status',
+		path: '/badge/status/:id',
+		params: [
+			['simple', 'whether to show online for idle and dnd statuses', 'false'],
+			labelP('currently'),
+			labelColorP,
+			colorP('brightgreen if online, yellow if idle, red if dnd, lightgray if offline'),
+			styleP
+		]
+	},
+	{
+		title: 'Playing',
+		path: '/badge/playing/:id',
+		params: [
+			labelP('playing'),
+			fallbackP('text to show on the right side if nothing is being played'),
+			labelColorP,
+			colorP('#5865f2'),
+			styleP
+		]
+	},
+	{
+		title: 'Visual Studio Code',
+		path: '/badge/vscode/:id',
+		params: [
+			labelP('coding'),
+			fallbackP("text to show on the right side if VS Code isn't in use"),
+			labelColorP,
+			colorP('#23a7f2'),
+			styleP,
+			hideLogoP('VS Code')
+		]
+	},
+	{
+		title: 'IntelliJ IDEA',
+		path: '/badge/intellij/:id',
+		params: [
+			labelP('coding'),
+			fallbackP("text to show on the right side if IntelliJ IDEA isn't in use"),
+			labelColorP,
+			colorP('#fe315d'),
+			styleP,
+			hideLogoP('IntelliJ')
+		]
+	},
+	{
+		title: 'Spotify',
+		path: '/badge/spotify/:id',
+		params: [
+			labelP('listening to'),
+			fallbackP("text to show on the right side if Spotify isn't in use"),
+			labelColorP,
+			colorP('#1db954'),
+			styleP,
+			hideLogoP('Spotify')
+		]
+	},
+	{
+		title: 'Crunchyroll',
+		path: '/badge/crunchyroll/:id',
+		params: [
+			labelP('watching'),
+			fallbackP("text to show on the right side if Crunchyroll isn't in use"),
+			labelColorP,
+			colorP('#f47521'),
+			styleP,
+			hideLogoP('Crunchyroll')
+		]
+	}
+]
+
+const renderDocs = (base: string) => `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#5865f2">
+<title>Badges Docs</title>
+<style>
+	:root { color-scheme: dark; }
+	* { box-sizing: border-box; }
+	body { margin: 0; background: #14161a; color: #e6e8eb; font: 16px/1.6 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; }
+	main { max-width: 860px; margin: 0 auto; padding: 48px 20px 96px; }
+	h1 { text-align: center; font-size: 2.5rem; margin: 0 0 32px; }
+	h2 { font-size: 1.75rem; margin: 48px 0 8px; }
+	h3 { font-size: 1.25rem; margin: 32px 0 8px; }
+	p { margin: 0 0 12px; }
+	a { color: #8f9bff; }
+	code.endpoint { display: block; padding: 10px 14px; margin: 0 0 12px; background: #1d2026; border-radius: 6px; color: #8f9bff; overflow-x: auto; white-space: nowrap; }
+	.table-wrap { overflow-x: auto; }
+	table { border-collapse: collapse; width: 100%; font-size: 0.95rem; }
+	th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid #2b2f36; vertical-align: top; }
+	th { color: #aab0b8; font-weight: 600; }
+	td:first-child { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+</style>
+</head>
+<body>
+<main>
+	<h1>Docs</h1>
+	<p>Badges showing what you're doing on Discord. Replace <code>:id</code> in each endpoint with your Discord user ID. The bot has to share a server with you for presence to show up.</p>
+	<p>Badges are generated with <a href="https://shields.io" target="_blank" rel="noopener">Shields.io</a>'s badge-maker library, so the query params follow the Shields format.</p>
+	<p>All query params are optional. Logos only display on the flat, flat-square, and plastic styles.</p>
+
+	<h2>Badges</h2>
+	${docSections.map(s => `
+	<h3>${s.title}</h3>
+	<code class="endpoint">${base}${s.path}</code>
+	<p>Query Params</p>
+	<div class="table-wrap">
+	<table>
+		<thead><tr><th>Param</th><th>Description</th><th>Default</th></tr></thead>
+		<tbody>
+			${s.params.map(([name, desc, def]) => `<tr><td>${name}</td><td>${desc}</td><td>${def}</td></tr>`).join('\n\t\t\t')}
+		</tbody>
+	</table>
+	</div>`).join('\n')}
+
+	<h2>Open Spotify</h2>
+	<code class="endpoint">${base}/openspotify/:id</code>
+	<p>Redirects to the track page of the song you're listening to on Spotify.</p>
+
+	<h2>Presence</h2>
+	<code class="endpoint">${base}/presence/:id</code>
+	<p>Returns a JSON object of your presence so you can integrate it another way.</p>
+</main>
+</body>
+</html>`
+
+app.get('/', c => {
+	const host = c.req.header('host') ?? new URL(c.req.url).host
+	const proto = c.req.header('x-forwarded-proto') ?? 'https'
+	return c.html(renderDocs(`${proto}://${host}`))
+})
 
 app.get('/badge/status/:id', c => {
 	const realStatus = presences.get(c.req.param('id'))?.status ?? PresenceUpdateStatus.Offline
