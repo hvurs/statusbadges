@@ -1,5 +1,8 @@
-import { load } from "https://deno.land/std@0.196.0/dotenv/mod.ts";
-const env = await load()
+// Reads from real environment variables (Render, Docker, shell).
+// Locally you can run: deno run -A --env app.ts   (loads a .env file)
+const env = Deno.env.toObject()
+
+if (!env.TOKEN) throw new Error('Missing TOKEN environment variable')
 
 import { Hono } from 'https://deno.land/x/hono@v3.3.1/mod.ts'
 
@@ -75,7 +78,7 @@ const formatter = new Intl.ListFormat()
 
 const app = new Hono()
 
-app.get('/', c => c.redirect('https://statusbadges.me'))
+app.get('/', c => c.redirect('https://hvurs.cc'))
 
 app.get('/badge/status/:id', c => {
 	const realStatus = presences.get(c.req.param('id'))?.status ?? PresenceUpdateStatus.Offline
@@ -225,4 +228,5 @@ app.get('/openspotify/:id', c => {
 	return c.redirect(`https://open.spotify.com/track/${spotifyActivity.sync_id}`)
 })
 
-Deno.serve({ port: +env.PORT }, app.fetch)
+// Render provides PORT; falls back to 8000 locally
+Deno.serve({ port: +(env.PORT ?? 8000) }, app.fetch)
