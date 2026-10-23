@@ -1,5 +1,6 @@
 // Reads from real environment variables (Render, Docker, shell).
-// Locally you can run: deno run -A --unstable-kv --env app.ts   (loads a .env file)
+// Locally you can run: deno run -A --env app.ts   (loads a .env file)
+// Deno KV is enabled through deno.json ("unstable": ["kv"]), keep that file next to app.ts.
 //
 // Env:
 //   TOKEN        (required) Discord bot token
@@ -36,8 +37,8 @@ const rest = new REST().setToken(env.TOKEN)
 
 const gateway = new WebSocketManager({
 	token: env.TOKEN,
-	// DM message content doesn't need the privileged MessageContent intent
-	intents: GatewayIntentBits.Guilds | GatewayIntentBits.GuildPresences | GatewayIntentBits.DirectMessages,
+	// slash commands arrive as interactions and need no privileged intents
+	intents: GatewayIntentBits.Guilds | GatewayIntentBits.GuildPresences,
 	rest
 })
 
@@ -90,6 +91,14 @@ const formatter = new Intl.ListFormat()
 /* ------------------------------------------------------------------ *
  * Persistent storage: KV pairs + API keys (Deno KV)
  * ------------------------------------------------------------------ */
+
+// Deno.openKv only exists when KV is enabled (deno.json "unstable": ["kv"], or --unstable-kv)
+if (typeof Deno.openKv !== 'function') {
+	throw new Error(
+		'Deno KV is not enabled. Add a deno.json next to app.ts containing {"unstable":["kv"]}, ' +
+		'or run with the --unstable-kv flag (e.g. deno run -A --unstable-kv app.ts).'
+	)
+}
 
 const kvdb = await Deno.openKv(env.KV_PATH || undefined)
 
@@ -275,7 +284,7 @@ const requireAuth = async (c: Context, id: string): Promise<Response | null> => 
 	const token = c.req.header('authorization')
 	const key = await getApiKey(id)
 	if (!token || !key || !safeEqual(token, key))
-		return c.json(apiError('unauthorized', 'Missing or invalid API key. DM the bot .apikey or use /apikey to get one'), 401)
+		return c.json(apiError('unauthorized', 'Missing or invalid API key. Use the /apikey command to get one'), 401)
 
 	return null
 }
@@ -596,7 +605,7 @@ const renderDocs = (host: string, proto: string) => {
 	<h2>KV</h2>
 	<p>A key-value store that is attached to your presence as <code>kv</code>. Use it for site config, your current location, anything dynamic. Changing a pair pushes a <code>PRESENCE_UPDATE</code> over the WebSocket.</p>
 	<h3>Getting an API key</h3>
-	<p>Run <code>/apikey</code> anywhere the bot is, or DM the bot <code>.apikey</code>. Send the key in the <code>Authorization</code> header of every KV request. <code>/apikey regenerate:true</code> replaces it.</p>
+	<p>Run <code>/apikey</code> anywhere the bot is, or in a DM with the bot. The reply is only visible to you. Send the key in the <code>Authorization</code> header of every KV request. <code>/apikey regenerate:true</code> replaces it.</p>
 	<h3>Limits</h3>
 	<ul>
 		<li>Keys and values are strings</li>
@@ -613,13 +622,13 @@ const renderDocs = (host: string, proto: string) => {
 	<p>Deletes a key.</p>
 	${code(kvSample)}
 	<h3>Discord</h3>
-	${paramTable(['Slash command', 'Text command (in DMs)', 'Description'], [
-		['/kv set key value', '.set &lt;key&gt; &lt;value&gt;', 'Set a key'],
-		['/kv get key', '.get &lt;key&gt;', 'Read a key'],
-		['/kv delete key', '.del &lt;key&gt;', 'Delete a key'],
-		['/kv list', '.list', 'List your keys'],
-		['/apikey [regenerate]', '.apikey', 'Get (or regenerate) your API key, only visible to you'],
-		['/forget confirm:true', '.forget', 'Delete your API key and every KV pair']
+	${paramTable(['Slash command', 'Description'], [
+		['/kv set key value', 'Set a key'],
+		['/kv get key', 'Read a key'],
+		['/kv delete key', 'Delete a key'],
+		['/kv list', 'List your keys'],
+		['/apikey [regenerate]', 'Get (or regenerate) your API key, only visible to you'],
+		['/forget confirm:true', 'Delete your API key and every KV pair']
 	])}
 
 	<h2>WebSocket</h2>
@@ -673,10 +682,10 @@ const renderPrivacy = (host: string) => shell(`Privacy Policy - ${SITE_NAME}`, `
 		<li><b>Account info:</b> your Discord user ID, username, display name, avatar, banner and banner color, profile flags and avatar decoration.</li>
 		<li><b>Presence:</b> your status (online, idle, dnd, offline), which clients you're active on (web, desktop, mobile) and your activities. Activities can include game names, what you're listening to on Spotify (song, artist, album, track ID, timestamps), and what you're working on in code editors such as the file name and workspace shown by VS Code or IntelliJ, plus your custom status text.</li>
 		<li><b>KV data (optional):</b> if you use the KV store, the keys and values you save and the API key generated for you.</li>
-		<li><b>Commands:</b> the content of slash commands and DMs you send the bot, only to carry them out (for example setting a KV key).</li>
+		<li><b>Commands:</b> the options of slash commands you run (for example the key and value of <code>/kv set</code>), only to carry them out.</li>
 		<li><b>Request logs:</b> like any web service, the hosting provider and the server may log requests, including IP addresses, user agents and the URLs requested (which contain Discord user IDs). The service itself does not store these.</li>
 	</ul>
-	<p>The service does <b>not</b> use cookies, analytics, trackers or ads, and it does not read your messages in servers.</p>
+	<p>The service does <b>not</b> use cookies, analytics, trackers or ads, and it does not read your messages.</p>
 
 	<h2>This data is public</h2>
 	<p>The whole point of the service is to publish your presence. <b>Anyone who knows your Discord user ID can read your account info and presence</b> through the REST API, WebSocket, badges and quicklinks, with no login. Your KV data is included in that same public response, so don't store anything secret in it. Only the API key is private, and it is only needed to write to your KV store.</p>
@@ -701,7 +710,7 @@ const renderPrivacy = (host: string) => shell(`Privacy Policy - ${SITE_NAME}`, `
 	<h2>Your choices</h2>
 	<ul>
 		<li><b>Stop presence sharing:</b> leave every server you share with the bot, or block the bot. It stops receiving your presence. A last-known status may linger in memory until the next restart.</li>
-		<li><b>Delete your stored data:</b> run <code>/forget confirm:true</code> (or DM <code>.forget</code>) to delete your API key and every KV pair immediately. You can also delete single keys with <code>/kv delete</code>.</li>
+		<li><b>Delete your stored data:</b> run <code>/forget confirm:true</code> to delete your API key and every KV pair immediately. You can also delete single keys with <code>/kv delete</code>.</li>
 		<li><b>Anything else</b> (questions, removal requests): contact us on <a href="${esc(INVITE_URL)}" target="_blank" rel="noopener">Discord</a>.</li>
 	</ul>
 
@@ -1141,24 +1150,28 @@ app.get('/openspotify/:id', c => {
 })
 
 /* ------------------------------------------------------------------ *
- * Discord bot side: slash commands + DM text commands
+ * Discord bot side: slash commands
  * ------------------------------------------------------------------ */
 
-const STRING = 3
+// ApplicationCommandOptionType
 const SUB_COMMAND = 1
+const STRING = 3
 const BOOLEAN = 5
 
 // contexts 0/1/2 = guild, bot DM, private channels. integration_types 0/1 = server install, user install
 const commandContexts = { integration_types: [0, 1], contexts: [0, 1, 2] }
 
+// type 1 = CHAT_INPUT (a real slash command). Set explicitly so Discord never has to guess.
 const commands = [
 	{
+		type: 1,
 		name: 'apikey',
 		description: 'Get your API key for the KV store (only visible to you)',
 		options: [{ type: BOOLEAN, name: 'regenerate', description: 'Generate a new key and invalidate the old one' }],
 		...commandContexts
 	},
 	{
+		type: 1,
 		name: 'kv',
 		description: 'Manage your key-value store',
 		options: [
@@ -1182,6 +1195,7 @@ const commands = [
 		...commandContexts
 	},
 	{
+		type: 1,
 		name: 'forget',
 		description: 'Delete your API key and all of your KV data',
 		options: [{ type: BOOLEAN, name: 'confirm', description: 'Set to true to confirm', required: true }],
@@ -1221,15 +1235,25 @@ const cmdForget = async (id: string) => {
 	return 'Done. Your API key and all KV data have been deleted.'
 }
 
-client.once(GatewayDispatchEvents.Ready, async e => {
-	console.log('Ready!', e.data)
-
+/**
+ * Registers the global slash commands. Discord only shows the "Supports Commands" ({/}) badge on the
+ * bot's profile when the application has global commands registered, so they are registered with a
+ * bulk overwrite on every start and then read back to confirm Discord actually has them.
+ */
+const registerCommands = async (applicationId: string) => {
 	try {
-		await client.api.applicationCommands.bulkOverwriteGlobalCommands(e.data.application.id, commands as never)
-		console.log('Registered slash commands')
+		const registered = await client.api.applicationCommands.bulkOverwriteGlobalCommands(applicationId, commands as never)
+		console.log(`Registered ${registered.length} global slash commands:`, registered.map(c => `/${c.name}`).join(', '))
 	} catch (err) {
 		console.error('Failed to register slash commands', err)
+		if ((err as { status?: number }).status === 401)
+			console.error('Discord rejected the token: check the TOKEN environment variable')
 	}
+}
+
+client.once(GatewayDispatchEvents.Ready, e => {
+	console.log(`Ready as ${e.data.user.username} (${e.data.user.id})`)
+	registerCommands(e.data.application.id)
 })
 
 type OptionValue = string | number | boolean | undefined
@@ -1276,48 +1300,6 @@ client.on(GatewayDispatchEvents.InteractionCreate, async ({ data: interaction, a
 		})
 	} catch (err) {
 		console.error('Failed to reply to interaction', err)
-	}
-})
-
-// Lanyard-compatible text commands, DMs only: .apikey .set .get .del .list .forget
-client.on(GatewayDispatchEvents.MessageCreate, async ({ data: message, api }) => {
-	if (message.author.bot || message.guild_id) return
-
-	const text = message.content.trim()
-	if (!text.startsWith('.')) return
-
-	const userId = message.author.id
-	const [cmd] = text.split(/\s+/)
-	let content: string | undefined
-
-	try {
-		if (cmd === '.apikey') {
-			content = await cmdApiKey(userId)
-		} else if (cmd === '.set') {
-			const m = text.match(/^\.set\s+(\S+)\s+([\s\S]+)$/)
-			content = m ? await cmdSet(userId, m[1], m[2]) : 'Usage: `.set <key> <value>`'
-		} else if (cmd === '.get') {
-			const m = text.match(/^\.get\s+(\S+)/)
-			content = m ? await cmdGet(userId, m[1]) : 'Usage: `.get <key>`'
-		} else if (cmd === '.del') {
-			const m = text.match(/^\.del\s+(\S+)/)
-			content = m ? await cmdDel(userId, m[1]) : 'Usage: `.del <key>`'
-		} else if (cmd === '.list') {
-			content = await cmdList(userId)
-		} else if (cmd === '.forget') {
-			content = await cmdForget(userId)
-		}
-	} catch (err) {
-		console.error(err)
-		content = 'Something went wrong, try again in a moment.'
-	}
-
-	if (!content) return
-
-	try {
-		await api.channels.createMessage(message.channel_id, { content, allowed_mentions: noMentions })
-	} catch (err) {
-		console.error('Failed to reply to message', err)
 	}
 })
 
